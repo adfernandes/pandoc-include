@@ -16,7 +16,7 @@ from natsort import natsorted
 from urllib.parse import urlparse
 
 from .format_heuristics import formatFromPath
-from .config import parseConfig, parseOptions, TEMP_FILE, Env
+from .config import parseConfig, parseOptions, Env
 
 
 # Global variables
@@ -33,7 +33,7 @@ RE_INCLUDE_PATTERN    = r"^(\\?(!|\$))include(-header)?(\`(?P<args>[^\`]+(, ?[^\
 options = None
 
 # parse env config
-Env.parse()
+Env.GetEnv()
 
 def extract_info(rawString):
     global options
@@ -81,7 +81,7 @@ def is_include_line(elem, raw=False):
             input_format='panflute',
             output_format='markdown_strict',
             standalone=True,
-            pandoc_path=Env.PandocBin
+            pandoc_path=Env.GetEnv().PandocBin
         )
     else:
         rawString = elem
@@ -267,7 +267,7 @@ def action(elem, doc):
         files = findFile(name)
         if len(files) == 0:
             msg = f"Included file not found: {name}"
-            if Env.NotFoundError:
+            if Env.GetEnv().NotFoundError:
                 raise IOError(msg)
             else:
                 pf.debug(f"[WARNING] {msg}")
@@ -307,7 +307,7 @@ def action(elem, doc):
             os.chdir(target)
 
             # pass options by temp files
-            with open(TEMP_FILE, 'w+') as f:
+            with open(Env.GetEnv().TempFile, 'w+') as f:
                 json.dump(options, f)
 
             # Add recursive include support
@@ -336,7 +336,7 @@ def action(elem, doc):
                         input_format=fmt,
                         standalone=True,
                         extra_args=pandoc_options,
-                        pandoc_path=Env.PandocBin
+                        pandoc_path=Env.GetEnv().PandocBin
                     )
 
                     new_metadata = new_doc.get_metadata(builtin=False)
@@ -348,7 +348,7 @@ def action(elem, doc):
                 new_metadata = pf.convert_text(
                     f"---\n{raw}\n---",
                     standalone=True,
-                    pandoc_path=Env.PandocBin
+                    pandoc_path=Env.GetEnv().PandocBin
                 ).get_metadata(builtin=False)
 
             # Merge metadata
@@ -358,8 +358,8 @@ def action(elem, doc):
                         doc.metadata[key] = new_metadata[key]
 
             # delete temp file (the file might have been deleted in subsequent executions)
-            if os.path.exists(TEMP_FILE):
-                os.remove(TEMP_FILE)
+            if os.path.exists(Env.GetEnv().TempFile):
+                os.remove(Env.GetEnv().TempFile)
             # Restore to current path
             os.chdir(cur_path)
             options["current-path"] = currentPath
@@ -387,7 +387,7 @@ def action(elem, doc):
         files = findFile(name)
         if len(files) == 0:
             msg = f"Included file not found: {name}"
-            if Env.NotFoundError:
+            if Env.GetEnv().NotFoundError:
                 raise IOError(msg)
             else:
                 pf.debug(f"[WARNING] {msg}")
