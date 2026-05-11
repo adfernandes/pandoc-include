@@ -2,6 +2,8 @@ import re
 import ast
 import os
 import json
+import tempfile
+import uuid
 
 import panflute as pf
 
@@ -19,25 +21,48 @@ CONFIG_KEYS = {
     "raw": str
 }
 
-# The temp filename should be fixed
-# in order to be found by subprocesses
-TEMP_FILE = '.temp.pandoc-include'
-
 def parseBoolValue(val):
     # use 1 or 0 (otherwise default to true if not empty)
     return val and val != "0"
 
-# Keys for env config
+# Keys for env config in a singleton pattern to ensure consistent access 
+# across parent and child processes without re-reading environment variables 
+# multiple times. This also allows for future expansion of config options 
+# without changing the interface.
 class Env:
-    # Throw error when included file not found
-    NotFoundError = False
-    # Pandoc binary for parsing included files
-    PandocBin = None
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-    def parse():
-        Env.NotFoundError = parseBoolValue(os.environ.get("PANDOC_INCLUDE_NOT_FOUND_ERROR", "0"))
-        Env.PandocBin = os.environ.get("PANDOC_BIN") or None
-
+    def __init__(self):
+        # guard against reinitialisation
+        if hasattr(self, "_initialized"):
+            return
+        # Throw error when included file not found
+        self.NotFoundError  = parseBoolValue(os.environ.get("PANDOC_INCLUDE_NOT_FOUND_ERROR", "0"))
+        # Pandoc binary for parsing included files
+        self.PandocBin      = os.environ.get("PANDOC_BIN") or None
+        # The identifier for this run (unique per execution, used for temp file naming)
+        # Generate a unique run ID if not already set (e.g. by a parent process) to allow
+        # multiple concurrent runs without conflict. Use the environment to ensure sub-process
+        # can access the same run ID. This also allows the run ID to be set externally if needed.
+        if os.environ.get("PANDOC_INCLUDE_RUN_ID") is None:
+            os.environ["PANDOC_INCLUDE_RUN_ID"] = str(uuid.uuid4())
+        self.RunId          = os.environ["PANDOC_INCLUDE_RUN_ID"]
+        # Temp file for storing options and state between parent and child processes. 
+        # Use environment variable to allow override and ensure sub-processes can access 
+        # the same path. Default to a unique file in the system temp directory to avoid 
+        # conflicts between concurrent runs and ensure cleanup after execution.
+        if os.environ.get("PANDOC_INCLUDE_TEMP_FILE") is None:
+            os.environ["PANDOC_INCLUDE_TEMP_FILE"] = os.path.join(tempfile.gettempdir(), '.temp.pandoc-include.' + self.RunId)
+        self.TempFile       = os.environ.get("PANDOC_INCLUDE_TEMP_FILE")
+        
+        self._initialized   = True
+        
+    def GetEnv():
+        return Env._instance or Env()
 
 def parseConfig(text):
     regex = re.compile(
@@ -85,8 +110,8 @@ defaultOptions = {
 }
 
 def parseOptions(doc):
-    if os.path.isfile(TEMP_FILE):
-        with open(TEMP_FILE, 'r') as f:
+    if os.path.isfile(Env.GetEnv().TempFile):
+        with open(Env.GetEnv().TempFile, 'r') as f:
             # merge with default options to prevent missing keys
             options = { **defaultOptions, **json.load(f) }
     else:
